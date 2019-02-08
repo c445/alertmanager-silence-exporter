@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"crypto/tls"
 	"flag"
 	"fmt"
 	"github.com/google/go-github/v22/github"
@@ -11,18 +12,21 @@ import (
 	"github.com/prometheus/client_golang/api"
 	"golang.org/x/oauth2"
 	"html/template"
+	"net/http"
 	"net/url"
+	"os"
+	"regexp"
 	"strings"
 	"time"
 )
 
 var (
-	//TODO remove token
-	githubToken            = flag.String("github-token", "", "token for github")
-	githubOrg              = flag.String("github-org", "c445", "org for github")
-	githubTeam             = flag.String("github-team", "core-platform", "team for github")
+	githubAPIURL           = flag.String("github-api-url", "https://api.github.com/", "api url of github")
+	githubToken            = flag.String("github-token", os.Getenv("GITHUB_TOKEN"), "token for github")
+	githubOrg              = flag.String("github-org", "org", "org for github")
+	githubTeam             = flag.String("github-team", "team", "team for github")
 	githubDiscussionTitle  = flag.String("github-discussion-title", "Silence Overview", "title for the github discussion")
-	githubAlertmanagerName = flag.String("github-alertmanager-name", "c01p005", "title for the alertmanager block in the github discussion")
+	githubAlertmanagerName = flag.String("github-alertmanager-name", "default", "title for the alertmanager block in the github discussion")
 	alertmanagerAddr       = flag.String("alertmanager-addr", "http://localhost:9093", "Address of alertmanager to create/extend/delete silences")
 	silenceCommentFilter   = flag.String("silence-comment-filter", "automated silence", "silences which comments contain this string are filtered out")
 )
@@ -33,7 +37,7 @@ var githubTemplate = `
 | Comment         | Creator           | Until          | Matchers          |
 |-----------------|-------------------|----------------|-------------------|
 {{- range $i, $t := .Silences }}
-| {{ $t.Comment }} | {{ $t.CreatedBy }} | {{ $t.EndsAt }} | {{ $t.Matchers }}  |
+| {{ $t.Comment }} | {{ $t.CreatedBy }} | {{ $t.EndsAt.Format "2006-01-02" }} | ` + "`" + `{{ $t.ID }}` + "`" + ` |
 {{- end }}
 
 Last updated on {{ .LastUpdatedAt }}
@@ -42,12 +46,16 @@ Last updated on {{ .LastUpdatedAt }}
 func main() {
 	flag.Parse()
 
-	tc := oauth2.NewClient(context.Background(), oauth2.StaticTokenSource(
+	tc := oauth2.NewClient(context.WithValue(context.Background(), oauth2.HTTPClient, &http.Client{
+		Transport: &http.Transport{
+			TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
+		},
+	}), oauth2.StaticTokenSource(
 		&oauth2.Token{AccessToken: *githubToken},
 	))
 
 	githubClient := github.NewClient(tc)
-	baseUrl, _ := url.Parse("https://git.daimler.com/api/v3/")
+	baseUrl, _ := url.Parse(*githubAPIURL)
 	githubClient.BaseURL = baseUrl
 
 	teams, _, err := githubClient.Teams.ListTeams(context.Background(), *githubOrg, &github.ListOptions{})
@@ -141,9 +149,18 @@ func getSilences() ([]*types.Silence, error) {
 		return nil, fmt.Errorf("error listing silences: %v", err)
 	}
 
+	regex := regexp.MustCompile(*silenceCommentFilter)
+
 	var filteredSilences []*types.Silence
 	for _, s := range silences {
-		if !strings.Contains(s.Comment, *silenceCommentFilter) {
+		if !regex.MatchString(s.Comment) && !time.Now().After(s.EndsAt) {
+			var matcher []string
+			for _, m := range s.Matchers {
+				matcher = append(matcher, m.String())
+			}
+			output := fmt.Sprintf("%v", matcher)
+			s.ID = strings.Replace(output, "|", "\\|", -1)
+			s.ID = strings.Replace(s.ID, "\"", "", -1)
 			filteredSilences = append(filteredSilences, s)
 		}
 	}
