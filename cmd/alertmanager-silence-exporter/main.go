@@ -88,9 +88,11 @@ func main() {
 	if discussion == nil {
 		isNew = true
 		pinned := true
+		body := ""
 		discussion = &github.TeamDiscussion{
 			Title:  githubDiscussionTitle,
 			Pinned: &pinned,
+			Body: &body,
 		}
 	}
 
@@ -185,6 +187,6 @@ func removeOldAlertmanagerBlock(body *string) {
 
 	if startIndex != -1 && endIndex != -1 {
 		oldBody := *body
-		*body = oldBody[:startIndex] + oldBody[endIndex:]
+		*body = oldBody[:startIndex-1] + oldBody[endIndex+len(getEndIdentifier()):]
 	}
 }
