@@ -12,6 +12,7 @@ import (
 	"github.com/prometheus/client_golang/api"
 	"golang.org/x/oauth2"
 	"html/template"
+	"log"
 	"net/http"
 	"net/url"
 	"os"
@@ -27,12 +28,13 @@ var (
 	githubTeam             = flag.String("github-team", "team", "team for github")
 	githubDiscussionTitle  = flag.String("github-discussion-title", "Silence Overview", "title for the github discussion")
 	githubAlertmanagerName = flag.String("github-alertmanager-name", "default", "title for the alertmanager block in the github discussion")
+	githubAlertmanagerLink = flag.String("github-alertmanager-link", "http://localhost:9093", "title for the alertmanager block in the github discussion")
 	alertmanagerAddr       = flag.String("alertmanager-addr", "http://localhost:9093", "Address of alertmanager to create/extend/delete silences")
 	silenceCommentFilter   = flag.String("silence-comment-filter", "automated silence|silenced our tenants", "silences which comments contain this string are filtered out")
 )
 
 var githubTemplate = `
-## {{ .Header }}
+## [{{ .Header }}]({{ .HeaderLink }})
 
 | Comment         | Creator           | Until          | Matchers          |
 |-----------------|-------------------|----------------|-------------------|
@@ -46,6 +48,8 @@ Last updated on {{ .LastUpdatedAt }}
 func main() {
 	flag.Parse()
 
+	log.Println("Logging into Github")
+
 	tc := oauth2.NewClient(context.WithValue(context.Background(), oauth2.HTTPClient, &http.Client{
 		Transport: &http.Transport{
 			TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
@@ -57,6 +61,8 @@ func main() {
 	githubClient := github.NewClient(tc)
 	baseUrl, _ := url.Parse(*githubAPIURL)
 	githubClient.BaseURL = baseUrl
+
+	log.Println("List teams")
 
 	teams, _, err := githubClient.Teams.ListTeams(context.Background(), *githubOrg, &github.ListOptions{})
 	if err != nil {
@@ -72,6 +78,8 @@ func main() {
 	if team == nil {
 		panic(fmt.Errorf("could not find team %s, only found teams %v", *githubTeam, teams))
 	}
+
+	log.Println("List team discussions")
 
 	discussions, _, err := githubClient.Teams.ListDiscussions(context.Background(), *team.ID, &github.DiscussionListOptions{})
 	if err != nil {
@@ -100,6 +108,8 @@ func main() {
 		removeOldAlertmanagerBlock(discussion.Body)
 	}
 
+	log.Println("Get silences from Alertmanager")
+
 	silences, err := getSilences()
 	if err != nil {
 		panic(err)
@@ -107,13 +117,17 @@ func main() {
 
 	data := struct {
 		Header        string
+		HeaderLink        string
 		Silences      []*types.Silence
 		LastUpdatedAt string
 	}{
 		Header:        *githubAlertmanagerName,
+		HeaderLink:        *githubAlertmanagerLink,
 		Silences:      silences,
 		LastUpdatedAt: time.Now().Format(time.RFC3339),
 	}
+
+	log.Println("Rendering new section")
 
 	var out bytes.Buffer
 	err = template.Must(template.New("body").Parse(githubTemplate)).Execute(&out, data)
@@ -126,11 +140,13 @@ func main() {
 	discussion.Body = &body
 
 	if isNew {
+		log.Println("Creating new discussion")
 		discussion, _, err = githubClient.Teams.CreateDiscussion(context.Background(), *team.ID, *discussion)
 		if err != nil {
 			panic(fmt.Errorf("error creating discussion %s in team %s in org %s: %v", *githubDiscussionTitle, *team.Name, *githubOrg, err))
 		}
 	} else {
+		log.Println("Editing discussion")
 		discussion, _, err = githubClient.Teams.EditDiscussion(context.Background(), *team.ID, *discussion.Number, *discussion)
 		if err != nil {
 			panic(fmt.Errorf("error editing discussion %s in team %s in org %s: %v", *githubDiscussionTitle, *team.Name, *githubOrg, err))

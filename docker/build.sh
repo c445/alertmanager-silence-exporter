@@ -3,7 +3,7 @@
 WORKDIR=`echo $0 | sed -e s/build.sh//`
 cd ${WORKDIR}/../
 
-IMAGE=${1:-"docker.io/sbueringer/alertmanager-silence-exporter:v0.1.0"}
+IMAGE=${1:-"docker.io/sbueringer/alertmanager-silence-exporter:latest"}
 
 rm -rf docker/dist
 CGO_ENABLED=0 go build -a -installsuffix cgo -v -o docker/dist/alertmanager-silence-exporter cmd/alertmanager-silence-exporter/main.go
