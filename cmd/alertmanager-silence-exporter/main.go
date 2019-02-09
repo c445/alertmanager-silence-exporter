@@ -28,7 +28,7 @@ var (
 	githubDiscussionTitle  = flag.String("github-discussion-title", "Silence Overview", "title for the github discussion")
 	githubAlertmanagerName = flag.String("github-alertmanager-name", "default", "title for the alertmanager block in the github discussion")
 	alertmanagerAddr       = flag.String("alertmanager-addr", "http://localhost:9093", "Address of alertmanager to create/extend/delete silences")
-	silenceCommentFilter   = flag.String("silence-comment-filter", "automated silence", "silences which comments contain this string are filtered out")
+	silenceCommentFilter   = flag.String("silence-comment-filter", "automated silence|silenced our tenants", "silences which comments contain this string are filtered out")
 )
 
 var githubTemplate = `
@@ -119,7 +119,8 @@ func main() {
 		panic(fmt.Errorf("error rendering template: %v", err))
 	}
 
-	body := fmt.Sprintf("%s\n%s\n%s", getStartIdentifier(), out.String(), getEndIdentifier())
+	// append new section
+	body := fmt.Sprintf("%s\n%s\n%s\n%s", *discussion.Body, getStartIdentifier(), out.String(), getEndIdentifier())
 	discussion.Body = &body
 
 	if isNew {
